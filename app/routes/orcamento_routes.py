@@ -1,104 +1,95 @@
-from flask import Blueprint, request, jsonify
+from flask_restx import Namespace, Resource, fields
+from flask import request
 from app.db import mongo
 from bson import ObjectId
 
-orcamento_bp = Blueprint('orcamento_bp', __name__)
+ns = Namespace('orcamentos', description='Operações com orçamentos')
 
-@orcamento_bp.route ('/orcamentos', methods=['POST'])
-def criar_orcamento():
-    # Cria orçamento para uma obra existente
-    # Campos obrigatórios: obra_id, valor, data_orcamento
-
-    data = request.get_json()
-
-    if not data or not all(k in data for k in ("obra_id", "valor", "data_orcamento")):
-        return jsonify({"error" : "Campos 'obra_id, 'valor', 'data_orcamento' são obrigatórios"}), 400
-    
-    try:
-        obra_id = ObjectId(data["obra_id"])
-    except Exception:
-        return jsonify({"error":"Obra não encontrada"}), 400
-    
-    # Verifica se a obra existe
-    if not mongo.db.obras.find_one({"_id": obra_id}):
-        return jsonify({"error": "Obra não encontrada."}), 404
-
-    novo_orcamento = {
-        "obra_id": obra_id,
-        "valor": float(data["valor"]),
-        "data_orcamento": data["data_orcamento"]
-    }
-
-    mongo.db.orcamentos.insert_one(novo_orcamento)
-
-    return jsonify({"message": "Orçamento criado com sucesso!"}), 201
+orcamento_model = ns.model('Orcamento', {
+    'obra_id': fields.String(required=True, description='ID da obra associada'),
+    'valor': fields.Float(required=True, description='Valor orçado'),
+    'data_orcamento': fields.String(required=True, description='Data do orçamento')
+})
 
 
-@orcamento_bp.route('/orcamentos', methods=['GET'])
-def listar_orcamentos():
-    """
-    Lista todos os orçamentos com informações da obra.
-    """
-    orcamentos = mongo.db.orcamentos.find()
-    resultado = []
+@ns.route('/')
+class OrcamentoList(Resource):
+    @ns.doc('listar_orcamentos')
+    def get(self):
+        orcs = mongo.db.orcamentos.find()
+        resultado = []
+        for o in orcs:
+            resultado.append({
+                "_id": str(o["_id"]),
+                "obra_id": str(o["obra_id"]),
+                "valor": o["valor"],
+                "data_orcamento": o["data_orcamento"]
+            })
+        return resultado
 
-    for orc in orcamentos:
-        obra = mongo.db.obras.find_one({"_id": orc["obra_id"]})
-        resultado.append({
-            "_id": str(orc["_id"]),
-            "valor": orc["valor"],
-            "data_orcamento": orc["data_orcamento"],
-            "obra": {
-                "_id": str(obra["_id"]),
-                "nome": obra["nome"]
-            } if obra else None
-        })
+    @ns.doc('criar_orcamento')
+    @ns.expect(orcamento_model)
+    def post(self):
+        data = request.get_json()
 
-    return jsonify(resultado)
+        if not data or not all(k in data for k in ("obra_id", "valor", "data_orcamento")):
+            return {"error": "Campos obrigatórios faltando"}, 400
+
+        try:
+            obra_oid = ObjectId(data["obra_id"])
+        except:
+            return {"error": "obra_id inválido"}, 400
+
+        if not mongo.db.obras.find_one({"_id": obra_oid}):
+            return {"error": "Obra não encontrada"}, 404
+
+        novo = {
+            "obra_id": obra_oid,
+            "valor": float(data["valor"]),
+            "data_orcamento": data["data_orcamento"]
+        }
+
+        mongo.db.orcamentos.insert_one(novo)
+        return {"message": "Orçamento criado com sucesso"}, 201
 
 
-@orcamento_bp.route('/orcamentos/<orcamento_id>', methods=['PUT'])
-def atualizar_orcamento(orcamento_id):
-    """
-    Atualiza o valor ou data de um orçamento.
-    """
-    data = request.get_json()
 
-    try:
-        orcamento_oid = ObjectId(orcamento_id)
-    except:
-        return jsonify({"error": "ID inválido."}), 400
+@ns.route('/<string:orcamento_id>')
+@ns.param('orcamento_id', 'ID do orçamento')
+class Orcamento(Resource):
+    def put(self, orcamento_id):
+        data = request.get_json()
 
-    orcamento = mongo.db.orcamentos.find_one({"_id": orcamento_oid})
-    if not orcamento:
-        return jsonify({"error": "Orçamento não encontrado."}), 404
+        try:
+            oid = ObjectId(orcamento_id)
+        except:
+            return {"error": "ID inválido"}, 400
 
-    update_data = {}
-    if "valor" in data:
-        update_data["valor"] = float(data["valor"])
-    if "data_orcamento" in data:
-        update_data["data_orcamento"] = data["data_orcamento"]
+        if not mongo.db.orcamentos.find_one({"_id": oid}):
+            return {"error": "Orçamento não encontrado"}, 404
 
-    if not update_data:
-        return jsonify({"error": "Nenhum campo válido para atualização."}), 400
+        update_data = {}
+        if "valor" in data:
+            update_data["valor"] = float(data["valor"])
+        if "data_orcamento" in data:
+            update_data["data_orcamento"] = data["data_orcamento"]
 
-    mongo.db.orcamentos.update_one({"_id": orcamento_oid}, {"$set": update_data})
+        if not update_data:
+            return {"error": "Nenhum campo para atualizar"}, 400
 
-    return jsonify({"message": "Orçamento atualizado com sucesso."})
+        mongo.db.orcamentos.update_one({"_id": oid}, {"$set": update_data})
+        return {"message": "Orçamento atualizado com sucesso"}
 
-@orcamento_bp.route('/orcamentos/<orcamento_id>', methods=['DELETE'])
-def deletar_orcamento(orcamento_id):
-    """
-    Remove um orçamento do banco.
-    """
-    try:
-        orcamento_oid = ObjectId(orcamento_id)
-    except:
-        return jsonify({"error": "ID inválido."}), 400
+    def delete(self, orcamento_id):
+        try:
+            oid = ObjectId(orcamento_id)
+        except:
+            return {"error": "ID inválido"}, 400
 
-    resultado = mongo.db.orcamentos.delete_one({"_id": orcamento_oid})
-    if resultado.deleted_count == 0:
-        return jsonify({"error": "Orçamento não encontrado."}), 404
+        resultado = mongo.db.orcamentos.delete_one({"_id": oid})
+        if resultado.deleted_count == 0:
+            return {"error": "Orçamento não encontrado"}, 404
 
-    return jsonify({"message": "Orçamento deletado com sucesso."})
+        return {"message": "Orçamento deletado com sucesso"}
+
 

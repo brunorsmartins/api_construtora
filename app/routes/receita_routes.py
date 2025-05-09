@@ -1,104 +1,93 @@
-from flask import Blueprint, request, jsonify
+from flask_restx import Namespace, Resource, fields
+from flask import request
 from app.db import mongo
 from bson import ObjectId
 
-receita_bp = Blueprint('receita_bp', __name__)
+ns = Namespace('receitas', description='Operações com receitas (pagamentos recebidos)')
+
+receita_model = ns.model('Receita', {
+    'obra_id': fields.String(required=True, description='ID da obra'),
+    'valor': fields.Float(required=True, description='Valor recebido'),
+    'data_recebimento': fields.String(required=True, description='Data do recebimento')
+})
 
 
-@receita_bp.route('/receitas', methods=['POST'])
-def criar_receita():
-    """
-    Registra uma receita (pagamento recebido) associada a uma obra.
-    Campos obrigatórios: obra_id, valor, data_recebimento
-    """
-    data = request.get_json()
 
-    if not data or not all(k in data for k in ("obra_id", "valor", "data_recebimento")):
-        return jsonify({"error": "Campos 'obra_id', 'valor' e 'data_recebimento' são obrigatórios."}), 400
+@ns.route('/')
+class ReceitaList(Resource):
+    @ns.doc('listar_receitas')
+    def get(self):
+        receitas = mongo.db.receitas.find()
+        resultado = []
+        for r in receitas:
+            resultado.append({
+                "_id": str(r["_id"]),
+                "obra_id": str(r["obra_id"]),
+                "valor": r["valor"],
+                "data_recebimento": r["data_recebimento"]
+            })
+        return resultado
 
-    try:
-        obra_id = ObjectId(data["obra_id"])
-    except Exception:
-        return jsonify({"error": "obra_id inválido."}), 400
+    @ns.doc('criar_receita')
+    @ns.expect(receita_model)
+    def post(self):
+        data = request.get_json()
 
-    if not mongo.db.obras.find_one({"_id": obra_id}):
-        return jsonify({"error": "Obra não encontrada."}), 404
+        if not data or not all(k in data for k in ("obra_id", "valor", "data_recebimento")):
+            return {"error": "Campos obrigatórios faltando"}, 400
 
-    nova_receita = {
-        "obra_id": obra_id,
-        "valor": float(data["valor"]),
-        "data_recebimento": data["data_recebimento"]
-    }
+        try:
+            obra_oid = ObjectId(data["obra_id"])
+        except:
+            return {"error": "obra_id inválido"}, 400
 
-    mongo.db.receitas.insert_one(nova_receita)
+        if not mongo.db.obras.find_one({"_id": obra_oid}):
+            return {"error": "Obra não encontrada"}, 404
 
-    return jsonify({"message": "Receita registrada com sucesso!"}), 201
+        nova = {
+            "obra_id": obra_oid,
+            "valor": float(data["valor"]),
+            "data_recebimento": data["data_recebimento"]
+        }
 
-
-@receita_bp.route('/receitas', methods=['GET'])
-def listar_receitas():
-    """
-    Lista todas as receitas com dados da obra.
-    """
-    receitas = mongo.db.receitas.find()
-    resultado = []
-
-    for r in receitas:
-        obra = mongo.db.obras.find_one({"_id": r["obra_id"]})
-        resultado.append({
-            "_id": str(r["_id"]),
-            "valor": r["valor"],
-            "data_recebimento": r["data_recebimento"],
-            "obra": {
-                "_id": str(obra["_id"]),
-                "nome": obra["nome"]
-            } if obra else None
-        })
-
-    return jsonify(resultado)
-
-@receita_bp.route('/receitas/<receita_id>', methods=['PUT'])
-def atualizar_receita(receita_id):
-    """
-    Atualiza o valor ou a data de uma receita.
-    """
-    data = request.get_json()
-
-    try:
-        receita_oid = ObjectId(receita_id)
-    except:
-        return jsonify({"error": "ID inválido."}), 400
-
-    receita = mongo.db.receitas.find_one({"_id": receita_oid})
-    if not receita:
-        return jsonify({"error": "Receita não encontrada."}), 404
-
-    update_data = {}
-    if "valor" in data:
-        update_data["valor"] = float(data["valor"])
-    if "data_recebimento" in data:
-        update_data["data_recebimento"] = data["data_recebimento"]
-
-    if not update_data:
-        return jsonify({"error": "Nenhum campo válido para atualização."}), 400
-
-    mongo.db.receitas.update_one({"_id": receita_oid}, {"$set": update_data})
-
-    return jsonify({"message": "Receita atualizada com sucesso."})
+        mongo.db.receitas.insert_one(nova)
+        return {"message": "Receita registrada com sucesso"}, 201
 
 
-@receita_bp.route('/receitas/<receita_id>', methods=['DELETE'])
-def deletar_receita(receita_id):
-    """
-    Remove uma receita do banco de dados.
-    """
-    try:
-        receita_oid = ObjectId(receita_id)
-    except:
-        return jsonify({"error": "ID inválido."}), 400
+@ns.route('/<string:receita_id>')
+@ns.param('receita_id', 'ID da receita')
+class Receita(Resource):
+    def put(self, receita_id):
+        data = request.get_json()
 
-    resultado = mongo.db.receitas.delete_one({"_id": receita_oid})
-    if resultado.deleted_count == 0:
-        return jsonify({"error": "Receita não encontrada."}), 404
+        try:
+            oid = ObjectId(receita_id)
+        except:
+            return {"error": "ID inválido"}, 400
 
-    return jsonify({"message": "Receita deletada com sucesso."})
+        if not mongo.db.receitas.find_one({"_id": oid}):
+            return {"error": "Receita não encontrada"}, 404
+
+        update_data = {}
+        if "valor" in data:
+            update_data["valor"] = float(data["valor"])
+        if "data_recebimento" in data:
+            update_data["data_recebimento"] = data["data_recebimento"]
+
+        if not update_data:
+            return {"error": "Nenhum campo para atualizar"}, 400
+
+        mongo.db.receitas.update_one({"_id": oid}, {"$set": update_data})
+        return {"message": "Receita atualizada com sucesso"}
+
+    def delete(self, receita_id):
+        try:
+            oid = ObjectId(receita_id)
+        except:
+            return {"error": "ID inválido"}, 400
+
+        resultado = mongo.db.receitas.delete_one({"_id": oid})
+        if resultado.deleted_count == 0:
+            return {"error": "Receita não encontrada"}, 404
+
+        return {"message": "Receita deletada com sucesso"}
