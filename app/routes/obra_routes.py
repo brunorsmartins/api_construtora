@@ -1,4 +1,6 @@
-from flask import request, jsonify
+# app/routes/obra_routes.py
+
+from flask import request
 from flask_restx import Namespace, Resource, fields
 from app.db import mongo
 from bson import ObjectId
@@ -6,13 +8,13 @@ from bson import ObjectId
 ns = Namespace('obras', description='Operações com obras')
 
 obra_model = ns.model('Obra', {
-    'cliente_id': fields.String(required=True, description='ID do cliente'),
-    'nome': fields.String(required=True, description='Nome da obra'),
+    'cliente_id':  fields.String(required=True, description='ID do cliente'),
+    'nome':        fields.String(required=True, description='Nome da obra'),
     'data_inicio': fields.String(required=True, description='Data de início'),
-    'status': fields.String(required=True, description='Status da obra (ex: ATIVA, FINALIZADA)')
+    'status':      fields.String(required=True, description='Status da obra (ex: ATIVA, FINALIZADA)')
 })
 
-@ns.route('/')
+@ns.route('/', strict_slashes=False)
 class ObraList(Resource):
     @ns.doc('listar_obras')
     def get(self):
@@ -32,7 +34,6 @@ class ObraList(Resource):
     @ns.expect(obra_model)
     def post(self):
         data = request.get_json()
-
         if not data or not all(k in data for k in ("cliente_id", "nome", "data_inicio", "status")):
             return {"error": "Campos obrigatórios faltando"}, 400
 
@@ -54,9 +55,29 @@ class ObraList(Resource):
         mongo.db.obras.insert_one(nova_obra)
         return {"message": "Obra criada com sucesso"}, 201
 
-@ns.route('/<string:obra_id>')
+
+@ns.route('/<string:obra_id>', strict_slashes=False)
 @ns.param('obra_id', 'ID da obra')
 class Obra(Resource):
+    def get(self, obra_id):
+        try:
+            oid = ObjectId(obra_id)
+        except:
+            return {"error": "ID inválido"}, 400
+
+        obra = mongo.db.obras.find_one({"_id": oid})
+        if not obra:
+            return {"error": "Obra não encontrada"}, 404
+
+        return {
+            "_id": str(obra["_id"]),
+            "cliente_id": str(obra["cliente_id"]),
+            "nome": obra["nome"],
+            "descricao": obra.get("descricao", ""),
+            "data_inicio": obra["data_inicio"],
+            "status": obra["status"]
+        }
+
     def put(self, obra_id):
         data = request.get_json()
 

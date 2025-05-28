@@ -3,6 +3,10 @@ from flask_restx import Api
 from .db import mongo
 from dotenv import load_dotenv
 import os
+from flask_cors import CORS
+
+
+
 
 # Namespaces importados
 from app.routes.cliente_routes import ns as cliente_ns
@@ -16,10 +20,13 @@ from app.routes.extra_routes import ns as extra_ns
 def create_app():
     load_dotenv()
     app = Flask(__name__)
+    app.url_map.strict_slashes = False
 
     # Configuração do Mongo via .env
     app.config["MONGO_URI"] = os.getenv("MONGO_URI")
     mongo.init_app(app)
+    CORS(app, supports_credentials=True,
+         resources={r"/*": {"origins": "http://localhost:3000"}})
 
     # Swagger via Flask-RESTX
     api = Api(
@@ -27,7 +34,9 @@ def create_app():
         version="1.0",
         title="API da Empreiteira",
         description="Documentação interativa da API usando Swagger (Flask-RESTX)",
-        doc="/docs"
+        doc="/docs",
+        strict_slashes=False
+        
     )
 
     # Registro dos namespaces
